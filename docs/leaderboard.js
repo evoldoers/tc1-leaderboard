@@ -1,17 +1,29 @@
 (function () {
   "use strict";
 
-  const SCORE_COMPONENTS = [
-    { key: "diversity", label: "Diversity" },
-    { key: "annotation", label: "Annotation" },
-    { key: "functionality", label: "Functionality" },
-    { key: "size", label: "Size" },
-  ];
+  // Detect repo owner/name from the Pages URL or fall back
+  const REPO_RAW_BASE = (function () {
+    // GitHub Pages URLs: {owner}.github.io/{repo}/
+    const m = location.hostname.match(/^(.+)\.github\.io$/);
+    if (m) {
+      const owner = m[1];
+      const repo = location.pathname.split("/")[1] || "";
+      return `https://raw.githubusercontent.com/${owner}/${repo}/main`;
+    }
+    // Local dev: assume relative paths work (they won't for .sto, but graceful fail)
+    return "";
+  })();
 
   async function fetchJSON(url) {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
     return resp.json();
+  }
+
+  async function fetchText(url) {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
+    return resp.text();
   }
 
   function scoreBar(value, max) {
@@ -25,24 +37,34 @@
     return `<span class="${cls}">${sym}</span>`;
   }
 
-  function buildRow(entry, rank) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td class="rank">${rank}</td>
-      <td class="team"><a data-team="${entry.team}">${entry.team}</a></td>
-      <td class="score-total">${scoreBar(entry.score, 100)}${entry.score.toFixed(1)}</td>
-      <td class="score-sub hide-mobile">${(entry.scores?.diversity ?? "").toString().slice(0, 4)}</td>
-      <td class="score-sub hide-mobile">${(entry.scores?.annotation ?? "").toString().slice(0, 4)}</td>
-      <td class="score-sub hide-mobile">${(entry.scores?.functionality ?? "").toString().slice(0, 4)}</td>
-      <td class="score-sub hide-mobile">${(entry.scores?.size ?? "").toString().slice(0, 4)}</td>
-      <td class="count">${entry.n_sequences}</td>
-      <td class="count">${entry.n_families}</td>
-      <td class="score-sub"><code>${(entry.commit || "").slice(0, 7)}</code></td>
-    `;
-    return tr;
+  // ── Stockholm parser (client-side) ──────────────────────────────────
+
+  function parseProteinSto(text) {
+    const sequences = {};
+    const order = [];
+    let triad = "";
+
+    for (const raw of text.split("\n")) {
+      const line = raw.trimEnd();
+      if (!line || line.startsWith("# ") || line === "//") continue;
+      if (line.startsWith("#=GC catalytic_triad")) {
+        triad = line.split(/\s+/).pop();
+      } else if (line.startsWith("#=GC") || line.startsWith("#=GF")) {
+        continue;
+      } else {
+        const parts = line.split(/\s+/);
+        if (parts.length >= 2) {
+          const id = parts[0].split("/")[0]; // strip /coord suffix
+          if (!(id in sequences)) order.push(id);
+          sequences[id] = (sequences[id] || "") + parts[1];
+        }
+      }
+    }
+    return { sequences, order, catalytic_triad: triad };
   }
 
-  // Residue coloring by physicochemical property
+  // ── Alignment renderer ──────────────────────────────────────────────
+
   const AA_CLASSES = {};
   "AILMFWV".split("").forEach(c => AA_CLASSES[c] = "aa-hydrophobic");
   "KR".split("").forEach(c => AA_CLASSES[c] = "aa-positive");
@@ -53,12 +75,12 @@
   "P".split("").forEach(c => AA_CLASSES[c] = "aa-proline");
   "HY".split("").forEach(c => AA_CLASSES[c] = "aa-aromatic");
 
-  function renderAlignment(alignment) {
-    if (!alignment || !alignment.sequences) return "";
+  function renderAlignment(aln) {
+    if (!aln || !aln.order.length) return "";
 
-    const ids = Object.keys(alignment.sequences);
-    const seqs = Object.values(alignment.sequences);
-    const triad = alignment.catalytic_triad || "";
+    const ids = aln.order;
+    const seqs = ids.map(id => aln.sequences[id]);
+    const triad = aln.catalytic_triad || "";
     const len = seqs[0].length;
     const BLOCK = 80;
     const pad = Math.max(...ids.map(s => s.length));
@@ -78,7 +100,6 @@
     for (let start = 0; start < len; start += BLOCK) {
       const end = Math.min(start + BLOCK, len);
 
-      // Sequence rows
       for (let s = 0; s < ids.length; s++) {
         const label = ids[s].padEnd(pad + 2);
         let row = `<span class="aln-label">${label}</span>`;
@@ -91,7 +112,7 @@
         html += row + "\n";
       }
 
-      // Triad annotation row
+      // Triad row
       let triadRow = " ".repeat(pad + 2);
       for (let i = start; i < end; i++) {
         const ch = triad[i] || ".";
@@ -122,7 +143,26 @@
     return html;
   }
 
-  function buildDetailRow(teamData) {
+  // ── Detail panel builder ────────────────────────────────────────────
+
+  function buildRow(entry, rank) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="rank">${rank}</td>
+      <td class="team"><a data-team="${entry.team}">${entry.team}</a></td>
+      <td class="score-total">${scoreBar(entry.score, 100)}${entry.score.toFixed(1)}</td>
+      <td class="score-sub hide-mobile">${(entry.scores?.diversity ?? "").toString().slice(0, 4)}</td>
+      <td class="score-sub hide-mobile">${(entry.scores?.annotation ?? "").toString().slice(0, 4)}</td>
+      <td class="score-sub hide-mobile">${(entry.scores?.functionality ?? "").toString().slice(0, 4)}</td>
+      <td class="score-sub hide-mobile">${(entry.scores?.size ?? "").toString().slice(0, 4)}</td>
+      <td class="count">${entry.n_sequences}</td>
+      <td class="count">${entry.n_families}</td>
+      <td class="score-sub"><code>${(entry.commit || "").slice(0, 7)}</code></td>
+    `;
+    return tr;
+  }
+
+  function buildDetailRow(teamData, team) {
     const tr = document.createElement("tr");
     tr.className = "detail-row";
     const td = document.createElement("td");
@@ -155,13 +195,42 @@
       }
     }
 
-    const alignmentHTML = renderAlignment(teamData.alignment);
+    // Alignment placeholder — loaded on first expand
+    const alnDiv = document.createElement("div");
+    alnDiv.className = "alignment-container";
+    alnDiv.dataset.team = team;
+    alnDiv.dataset.loaded = "false";
 
-    td.innerHTML = `<div class="detail-panel">${checksHTML}${issuesHTML}${alignmentHTML}</div>`;
+    td.innerHTML = `<div class="detail-panel">${checksHTML}${issuesHTML}</div>`;
+    td.querySelector(".detail-panel").appendChild(alnDiv);
     tr.appendChild(td);
     tr.style.display = "none";
     return tr;
   }
+
+  async function loadAlignment(container) {
+    if (container.dataset.loaded === "true") return;
+    container.dataset.loaded = "true";
+
+    const team = container.dataset.team;
+    if (!REPO_RAW_BASE) {
+      container.innerHTML = '<p class="aln-note">Alignment view requires GitHub Pages hosting.</p>';
+      return;
+    }
+
+    const url = `${REPO_RAW_BASE}/entries/${team}/protein.sto`;
+    container.innerHTML = '<p class="aln-note">Loading alignment\u2026</p>';
+
+    try {
+      const text = await fetchText(url);
+      const aln = parseProteinSto(text);
+      container.innerHTML = renderAlignment(aln);
+    } catch (e) {
+      container.innerHTML = `<p class="aln-note">Could not load alignment: ${e.message}</p>`;
+    }
+  }
+
+  // ── Init ────────────────────────────────────────────────────────────
 
   async function init() {
     const tbody = document.getElementById("leaderboard-body");
@@ -186,17 +255,15 @@
       return;
     }
 
-    // Sort by score descending
     data.entries.sort((a, b) => b.score - a.score);
 
-    // Load all score files in parallel for detail panels
     const scoreFiles = {};
     await Promise.allSettled(
       data.entries.map(async (entry) => {
         try {
           scoreFiles[entry.team] = await fetchJSON(`scores/${entry.team}.json`);
         } catch {
-          /* score file not copied yet, that's OK */
+          /* score file not copied yet */
         }
       })
     );
@@ -205,14 +272,24 @@
       const row = buildRow(entry, i + 1);
       tbody.appendChild(row);
 
-      const detailRow = buildDetailRow(scoreFiles[entry.team] || {});
+      const detailRow = buildDetailRow(scoreFiles[entry.team] || {}, entry.team);
       tbody.appendChild(detailRow);
 
-      // Toggle detail on team name click
       row.querySelector("[data-team]").addEventListener("click", () => {
-        detailRow.style.display =
-          detailRow.style.display === "none" ? "table-row" : "none";
+        const showing = detailRow.style.display === "none";
+        detailRow.style.display = showing ? "table-row" : "none";
+        if (showing) {
+          const container = detailRow.querySelector(".alignment-container");
+          if (container) loadAlignment(container);
+        }
       });
+
+      // Auto-expand the top-ranked entry
+      if (i === 0) {
+        detailRow.style.display = "table-row";
+        const container = detailRow.querySelector(".alignment-container");
+        if (container) loadAlignment(container);
+      }
     });
   }
 
