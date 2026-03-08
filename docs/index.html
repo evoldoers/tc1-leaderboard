@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ITm Seed Dataset Leaderboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>ITm Seed Dataset Leaderboard</h1>
+  <p class="subtitle">
+    Curated IS630/Tc1/mariner transposable element collections &mdash; Stage 1
+  </p>
+  <p class="updated" id="updated"></p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Team</th>
+        <th>Score</th>
+        <th class="hide-mobile">Div</th>
+        <th class="hide-mobile">Ann</th>
+        <th class="hide-mobile">Func</th>
+        <th class="hide-mobile">Size</th>
+        <th>Seqs</th>
+        <th>Fam</th>
+        <th>Commit</th>
+      </tr>
+    </thead>
+    <tbody id="leaderboard-body">
+    </tbody>
+  </table>
+
+  <section class="how-to-submit">
+    <h2>How to submit</h2>
+    <ol>
+      <li><strong>Fork</strong> this repo.</li>
+      <li>Create <code>entries/{your-github-username}/</code> with three files:
+        <code>protein.sto</code>, <code>dna.sto</code>, and <code>provenance.tsv</code>.
+        Optional: PDB structure files.</li>
+      <li><strong>Open a pull request</strong> to <code>main</code>.</li>
+      <li>CI validates your entry and reports pass/fail on the PR.</li>
+      <li>If <em>all</em> changed files are inside <code>entries/{your-github-username}/</code>,
+        the PR is <strong>automatically approved and merged</strong>.</li>
+      <li>The leaderboard updates with your score after merge.</li>
+    </ol>
+    <p>
+      Your entry directory must match your GitHub username (lowercase).
+      PRs that touch files outside your own entry require manual review.
+      To update, open a new PR. To withdraw, delete your entry directory via PR.
+    </p>
+    <p>
+      See the <a href="https://github.com/ihh/tc1-leaderboard/blob/main/CLAUDE.md">format spec</a>
+      and <a href="https://github.com/ihh/tc1-leaderboard/blob/main/POLICY.md">scoring policy</a>
+      for details.
+    </p>
+  </section>
+
+  <noscript>
+    <p class="empty-state">
+      JavaScript is required to render the leaderboard.
+      View the raw data: <a href="leaderboard.json">leaderboard.json</a>
+    </p>
+  </noscript>
+
+  <script src="leaderboard.js"></script>
+</body>
+</html>

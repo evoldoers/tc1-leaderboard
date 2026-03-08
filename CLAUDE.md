@@ -27,6 +27,12 @@ tc1-leaderboard/
 │   ├── team-alpha.json         # Validation results + score
 │   └── team-beta.json
 ├── leaderboard.json            # Aggregated ranked leaderboard
+├── docs/                       # GitHub Pages site (auto-updated by CI)
+│   ├── index.html              # Main leaderboard page
+│   ├── style.css               # Styling
+│   ├── leaderboard.js          # Client-side rendering from JSON
+│   ├── leaderboard.json        # Copy of root leaderboard.json
+│   └── scores/                 # Copies of score files
 ├── ci/
 │   ├── validate.py             # Main validation + scoring script
 │   ├── checks/                 # Modular validation checks
@@ -209,6 +215,8 @@ All checks produce a pass/fail/warn status and a message. An entry with any hard
 - `assembly` is a plausible accession format.
 - Coordinates are internally consistent (`start` < `end`, `strand` is `+` or `-`).
 
+If it is not beyond the scope of GitHub actions (e.g. if there is a REST service for a fast subsequence retrieval that we can query), provenance should be verified.
+
 ### Scoring
 
 The score for an entry is a weighted combination of factors designed to reward phylogenetically diverse, well-annotated, high-confidence collections. The total score is normalized to 0–100.
@@ -241,7 +249,7 @@ Goal: span the phylogenetic space of the ITm superfamily, not pile up near-ident
 
 - Logarithmic scaling: score = min(1, log2(N) / log2(target)), where `target` is a configurable parameter (e.g. 64 sequences).
 - This rewards having enough sequences to be useful as a seed dataset, but saturates — 200 sequences is not much better than 64 for a seed. The point is to span space, not to be exhaustive.
-- Hard penalty if N < 3 (entry is rejected).
+- Hard penalty if N < 3 or N > 300 (entry is rejected).
 
 #### Score normalization
 
@@ -304,9 +312,62 @@ The GitHub Actions workflow (`.github/workflows/validate.yml`) triggers on pushe
 
 Entries that fail hard validation checks (format errors, missing required files, ID mismatches) receive a score of 0 and a descriptive error in their score file.
 
+
 ## Updating an entry
 
 To update an entry, simply push a new commit modifying files in your `entries/{team}/` directory. The CI will re-run validation and overwrite the previous score. The leaderboard always reflects the latest commit for each team.
+
+## GitHub Pages leaderboard site
+
+The leaderboard is published as a static site via GitHub Pages, automatically updated by CI.
+
+### Site structure
+
+```
+docs/
+├── index.html         # Main leaderboard page (auto-generated)
+├── style.css          # Minimal styling
+└── leaderboard.js     # Reads leaderboard.json and renders the table
+```
+
+### How it works
+
+1. The validation CI workflow (`.github/workflows/validate.yml`) produces `leaderboard.json` at the repo root as before.
+2. A second workflow step (or a dedicated workflow `.github/workflows/pages.yml`) runs after validation completes:
+   - Copies `leaderboard.json` and all `scores/*.json` into `docs/`.
+   - Commits any changes to `docs/`.
+3. GitHub Pages is configured to serve from the `docs/` folder on the `main` branch (Settings → Pages → Source: `main` / `docs`).
+4. `docs/index.html` is a single-page app that fetches `leaderboard.json` at load time and renders a ranked table with columns: rank, team, total score, sub-scores (diversity, annotation, functionality, size), number of sequences, number of families, and last commit.
+5. Clicking a team name expands to show per-check status and per-sequence issues from `scores/{team}.json`.
+
+### Design constraints
+
+- **No build step.** The site is plain HTML + CSS + vanilla JS. No bundler, no framework, no Node.
+- **Data-driven.** All content comes from the JSON files. The HTML/JS never hard-codes team names or scores.
+- **Accessible.** Semantic HTML table, readable without JS (a `<noscript>` fallback links directly to `leaderboard.json`).
+- **Mobile-friendly.** Responsive table layout via CSS.
+- **Auto-refresh.** The CI keeps `docs/leaderboard.json` up to date; the page always shows the latest data because it fetches from the same repo's GitHub Pages URL.
+
+### CI integration
+
+The pages deployment step should be added to the end of the existing validation workflow:
+
+```yaml
+# After the validation and scoring steps:
+- name: Update GitHub Pages data
+  run: |
+    mkdir -p docs
+    cp leaderboard.json docs/
+    cp scores/*.json docs/scores/ 2>/dev/null || true
+
+- name: Commit docs
+  run: |
+    git add docs/
+    git diff --cached --quiet || git commit -m "Update leaderboard site [skip ci]"
+    git push
+```
+
+The `[skip ci]` tag prevents infinite CI loops from the docs commit.
 
 ## Reuse plan
 
@@ -350,3 +411,4 @@ When asked to work on this project, Claude should:
 5. **Write tests.** The `ci/` directory should include test fixtures (minimal valid and invalid entries) and pytest-based tests for every check.
 6. **Design for reuse.** The Stockholm parser, annotation validator, and protein/DNA consistency checks will be reused for the big data leaderboard. Keep them modular and dependency-light.
 7. **Do not over-engineer.** This is a research tool, not a production service. Clarity and correctness over abstraction.
+8. **Keep the GitHub Pages site working.** When changing the score output format or leaderboard.json schema, update `docs/leaderboard.js` to match. The site must always render correctly from the current JSON structure.

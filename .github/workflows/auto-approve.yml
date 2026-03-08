@@ -1,0 +1,108 @@
+name: Auto-approve own entry
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'entries/**'
+
+permissions:
+  pull-requests: write
+  contents: write
+
+jobs:
+  check-and-approve:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if PR only modifies own entry
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const author = pr.user.login.toLowerCase();
+            const expectedDir = `entries/${author}/`;
+
+            // Get all files changed in this PR
+            const files = await github.paginate(
+              github.rest.pulls.listFiles,
+              { owner: context.repo.owner, repo: context.repo.repo, pull_number: pr.number }
+            );
+
+            const changedPaths = files.map(f => f.filename);
+            core.info(`PR author: ${author}`);
+            core.info(`Expected directory: ${expectedDir}`);
+            core.info(`Changed files: ${changedPaths.join(', ')}`);
+
+            // Every changed file must be under entries/{author}/
+            const unauthorized = changedPaths.filter(
+              p => !p.toLowerCase().startsWith(expectedDir)
+            );
+
+            if (unauthorized.length > 0) {
+              core.info(`Unauthorized changes: ${unauthorized.join(', ')}`);
+              core.setOutput('approved', 'false');
+              core.setOutput('reason',
+                `PR modifies files outside entries/${author}/: ${unauthorized.join(', ')}`
+              );
+              return;
+            }
+
+            if (changedPaths.length === 0) {
+              core.setOutput('approved', 'false');
+              core.setOutput('reason', 'No files changed');
+              return;
+            }
+
+            core.setOutput('approved', 'true');
+            core.setOutput('reason', `All ${changedPaths.length} files are under ${expectedDir}`);
+
+      - name: Approve PR
+        if: steps.check.outputs.approved == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            await github.rest.pulls.createReview({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              event: 'APPROVE',
+              body: `Auto-approved: all changes are scoped to \`entries/${pr.user.login.toLowerCase()}/\`.`
+            });
+            core.info('PR approved');
+
+      - name: Enable auto-merge
+        if: steps.check.outputs.approved == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            try {
+              await github.graphql(`
+                mutation($prId: ID!) {
+                  enablePullRequestAutoMerge(input: {
+                    pullRequestId: $prId,
+                    mergeMethod: SQUASH
+                  }) { clientMutationId }
+                }
+              `, { prId: pr.node_id });
+              core.info('Auto-merge enabled');
+            } catch (e) {
+              // Auto-merge may not be enabled in repo settings — that's OK
+              core.warning(`Could not enable auto-merge: ${e.message}`);
+            }
+
+      - name: Post rejection comment
+        if: steps.check.outputs.approved == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const reason = '${{ steps.check.outputs.reason }}';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              body: `This PR cannot be auto-approved. ${reason}\n\nA maintainer will need to review manually.`
+            });
