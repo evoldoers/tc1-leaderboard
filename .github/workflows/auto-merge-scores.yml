@@ -1,0 +1,51 @@
+name: Auto-merge score updates
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scores/**'
+      - 'leaderboard.json'
+      - 'docs/leaderboard.json'
+      - 'docs/scores/**'
+
+permissions:
+  pull-requests: write
+  contents: write
+
+jobs:
+  auto-merge-scores:
+    runs-on: ubuntu-latest
+    if: github.actor == 'github-actions[bot]'
+    steps:
+      - name: Approve score update PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            await github.rest.pulls.createReview({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              event: 'APPROVE',
+              body: 'Auto-approved: automated score update from validation pipeline.'
+            });
+
+      - name: Enable auto-merge
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            try {
+              await github.graphql(`
+                mutation($prId: ID!) {
+                  enablePullRequestAutoMerge(input: {
+                    pullRequestId: $prId,
+                    mergeMethod: SQUASH
+                  }) { clientMutationId }
+                }
+              `, { prId: pr.node_id });
+              core.info('Auto-merge enabled');
+            } catch (e) {
+              core.warning(`Could not enable auto-merge: ${e.message}`);
+            }
