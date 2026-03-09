@@ -89,6 +89,7 @@ jobs:
         run: |
           mkdir -p docs/scores
           cp leaderboard.json docs/ 2>/dev/null || true
+          cp top_history.json docs/ 2>/dev/null || true
           cp scores/*.json docs/scores/ 2>/dev/null || true
           # Remove stale docs scores
           for f in docs/scores/*.json; do
@@ -109,5 +110,7 @@ jobs:
           add-paths: |
             scores/
             leaderboard.json
+            top_history.json
             docs/leaderboard.json
+            docs/top_history.json
             docs/scores/

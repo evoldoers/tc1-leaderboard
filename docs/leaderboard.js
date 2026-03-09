@@ -145,6 +145,12 @@
 
   // ── Detail panel builder ────────────────────────────────────────────
 
+  function formatTimeAtTop(frac) {
+    if (frac == null || frac === 0) return "";
+    const pct = (frac * 100).toFixed(0);
+    return `${scoreBar(frac * 100, 100)}${pct}%`;
+  }
+
   function buildRow(entry, rank) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
@@ -157,6 +163,7 @@
       <td class="score-sub hide-mobile">${(entry.scores?.size ?? "").toString().slice(0, 4)}</td>
       <td class="count">${entry.n_sequences}</td>
       <td class="count">${entry.n_families}</td>
+      <td class="score-sub hide-mobile">${formatTimeAtTop(entry.time_at_top)}</td>
       <td class="score-sub"><code>${(entry.commit || "").slice(0, 7)}</code></td>
     `;
     return tr;
@@ -166,7 +173,7 @@
     const tr = document.createElement("tr");
     tr.className = "detail-row";
     const td = document.createElement("td");
-    td.colSpan = 10;
+    td.colSpan = 11;
 
     let checksHTML = "";
     if (teamData.checks) {
@@ -241,7 +248,7 @@
       data = await fetchJSON("leaderboard.json");
     } catch (e) {
       tbody.innerHTML =
-        '<tr><td colspan="10" class="empty-state">No leaderboard data yet. Submit an entry to get started.</td></tr>';
+        '<tr><td colspan="11" class="empty-state">No leaderboard data yet. Submit an entry to get started.</td></tr>';
       return;
     }
 
@@ -251,7 +258,7 @@
 
     if (!data.entries || data.entries.length === 0) {
       tbody.innerHTML =
-        '<tr><td colspan="10" class="empty-state">No entries yet.</td></tr>';
+        '<tr><td colspan="11" class="empty-state">No entries yet.</td></tr>';
       return;
     }
 

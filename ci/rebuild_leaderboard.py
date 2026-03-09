@@ -83,6 +83,9 @@ def main():
     docs_scores = docs_dir / "scores"
     docs_scores.mkdir(parents=True, exist_ok=True)
     shutil.copy2(leaderboard_path, docs_dir / "leaderboard.json")
+    history_path = root / "top_history.json"
+    if history_path.exists():
+        shutil.copy2(history_path, docs_dir / "top_history.json")
     for f in scores_dir.glob("*.json"):
         shutil.copy2(f, docs_scores / f.name)
     # Remove stale docs scores

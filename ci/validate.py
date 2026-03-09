@@ -167,6 +167,48 @@ def _build_report(
     }
 
 
+def _update_top_history(history_path: Path, leader: str, score: float) -> list[dict]:
+    """Append to top_history.json if the leader changed. Returns the history."""
+    history: list[dict] = []
+    if history_path.exists():
+        try:
+            history = json.loads(history_path.read_text())
+        except (json.JSONDecodeError, ValueError):
+            history = []
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Append if leader changed (or first entry)
+    if not history or history[-1].get("team") != leader:
+        history.append({"team": leader, "score": score, "timestamp": now})
+        history_path.write_text(json.dumps(history, indent=2) + "\n")
+
+    return history
+
+
+def _compute_time_at_top(history: list[dict]) -> dict[str, float]:
+    """Compute fraction of time each team has been the leader."""
+    if not history:
+        return {}
+
+    now = datetime.now(timezone.utc)
+    durations: dict[str, float] = {}
+
+    for i, entry in enumerate(history):
+        start = datetime.fromisoformat(entry["timestamp"])
+        if i + 1 < len(history):
+            end = datetime.fromisoformat(history[i + 1]["timestamp"])
+        else:
+            end = now
+        secs = max(0, (end - start).total_seconds())
+        durations[entry["team"]] = durations.get(entry["team"], 0) + secs
+
+    total = sum(durations.values())
+    if total == 0:
+        return {t: 1.0 for t in durations}  # single snapshot
+    return {t: d / total for t, d in durations.items()}
+
+
 def update_leaderboard(scores_dir: Path, output_path: Path) -> None:
     """Read all score files and produce a ranked leaderboard.json."""
     entries = []
@@ -193,6 +235,18 @@ def update_leaderboard(scores_dir: Path, output_path: Path) -> None:
         ),
         reverse=True,
     )
+
+    # Track time at top
+    history_path = output_path.parent / "top_history.json"
+    if entries:
+        history = _update_top_history(
+            history_path, entries[0]["team"], entries[0]["score"]
+        )
+        time_at_top = _compute_time_at_top(history)
+        for entry in entries:
+            entry["time_at_top"] = round(time_at_top.get(entry["team"], 0), 4)
+    else:
+        time_at_top = {}
 
     leaderboard = {
         "updated": datetime.now(timezone.utc).isoformat(),
